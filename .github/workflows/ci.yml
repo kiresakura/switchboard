@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支上若有新的 push，取消仍在排隊／執行的舊流程，避免重複佔用 runner
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck & Lint
+    runs-on: ubuntu-latest
+
+    # tsc 與 eslint 不會連線資料庫，但 Prisma schema 的 datasource 讀 env("DATABASE_URL")，
+    # 給一個 dummy 連線字串，確保 `prisma generate` 在乾淨環境也不會因缺少 env 而報錯。
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/switchboard
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck & Lint
+        run: npm run check
