@@ -1,0 +1,9 @@
+services:
+  bridge:
+    ports:
+      - "127.0.0.1:3001:3001"
+    environment:
+      ENABLE_QA_INJECT: "1"
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"

@@ -1,0 +1,36 @@
+name: switchboard
+services:
+  db:
+    # 2026-05-21:換成 pgvector 官方 image,內建 pgvector + pg_trgm extensions,
+    # 對應 AI 副駕 embedding(1536-dim)+ chat search GIN trigram。
+    image: pgvector/pgvector:pg16
+    ports:
+      # 對齊 .env DATABASE_URL=…@localhost:5435/switchboard;避開其他本機 Postgres 衝突。
+      - "127.0.0.1:5435:5432"
+    environment:
+      POSTGRES_DB: switchboard
+      POSTGRES_USER: switchboard
+      POSTGRES_PASSWORD: switchboard_dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U switchboard -d switchboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2026-05-21 OSS A:Redis for multi-instance SSE pub/sub fanout。
+  # 單機 dev 即使沒這個也能跑(event-bus.ts 會 fallback in-memory)— 但加上才能驗
+  # multi-instance 行為。Port 6380 避開其他本機 Redis 衝突。
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:

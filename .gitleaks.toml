@@ -1,0 +1,24 @@
+# gitleaks config — secret scanning for this repo.
+# Run locally:  gitleaks detect --no-banner
+# Or wire into a pre-commit hook / CI step.
+title = "Switchboard gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known placeholders in committed example/config files (not real secrets)"
+regexes = [
+  '''change-me-to-a-random-32-byte-hex-string''',
+  '''CHANGE_ME_64_HEX_CHARS''',
+  '''CHANGE_ME_STRONG_DB_PASSWORD''',
+  '''CHANGE_ME_INITIAL_PW''',
+  '''build-time-placeholder-replaced-at-runtime''',
+  '''YOUR_TELEGRAM_API_HASH''',
+  '''postgresql://fake:fake@''',
+]
+paths = [
+  '''\.env\.example''',
+  '''\.env\.production\.example''',
+  '''Dockerfile''',
+]

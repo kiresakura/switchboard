@@ -1,0 +1,84 @@
+# ═══════════════════════════════════════════════════════════
+# Switchboard Nginx 反向代理設定範本
+# ═══════════════════════════════════════════════════════════
+# 部署步驟：
+#   1. 替換 switchboard.example.com 為你的實際網域
+#   2. 先取得 SSL 憑證：
+#      sudo certbot certonly --nginx -d switchboard.example.com
+#   3. 複製此檔到 /etc/nginx/sites-available/switchboard
+#   4. 建立連結：sudo ln -s /etc/nginx/sites-available/switchboard /etc/nginx/sites-enabled/
+#   5. 測試並重啟：sudo nginx -t && sudo systemctl reload nginx
+
+# ── HTTP → HTTPS 強制導向 ──────────────────────────
+server {
+    listen 80;
+    listen [::]:80;
+    server_name switchboard.example.com;
+    return 301 https://$server_name$request_uri;
+}
+
+# ── HTTPS 主服務 ───────────────────────────────────
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name switchboard.example.com;
+
+    # SSL 憑證（Let's Encrypt 路徑）
+    ssl_certificate /etc/letsencrypt/live/switchboard.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/switchboard.example.com/privkey.pem;
+
+    # SSL 強化設定
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # HSTS
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # 檔案上傳大小（審核附件、媒體檔案）
+    client_max_body_size 20M;
+
+    # 日誌
+    access_log /var/log/nginx/switchboard_access.log;
+    error_log /var/log/nginx/switchboard_error.log;
+
+    # ── Next.js App ────────────────────────────────
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+
+        # SSE / WebSocket 支援（/api/realtime）
+        proxy_buffering off;
+        proxy_read_timeout 24h;
+    }
+
+    # ── SSE 特化路徑（確保不被 buffer）─────────────
+    location /api/realtime {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        # SSE 必要設定
+        proxy_buffering off;
+        proxy_cache off;
+        chunked_transfer_encoding on;
+        proxy_read_timeout 24h;
+    }
+
+    # ── 拒絕外部存取 bridge 內部 API ────────────────
+    location /api/internal/ {
+        # 只允許 docker 網路（自動過 proxy）或本機來源
+        # 其他來源一律拒絕
+        deny all;
+    }
+}

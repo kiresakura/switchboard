@@ -1,0 +1,27 @@
+[project]
+name = "switchboard-voip-helper"
+version = "0.1.0"
+description = "Switchboard Telegram VoIP media helper: real Telegram 1:1 calls bridged to browser WebRTC (voice)."
+requires-python = ">=3.12"
+dependencies = [
+    "ntgcalls>=2.2.2,<3",
+    "py-tgcalls>=2.3.0,<3",
+    "telethon>=1.43,<2",
+    "aiortc>=1.14,<2",
+    "aiohttp>=3.10,<4",
+    "numpy>=1.26",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]

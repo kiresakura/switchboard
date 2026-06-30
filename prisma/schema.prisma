@@ -1,0 +1,1001 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── IDENTITY & ACCESS ───────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  username      String    @unique
+  passwordHash  String
+  displayName   String
+  isSystemAdmin Boolean   @default(false)
+  isActive      Boolean   @default(true)
+  lastActiveAt  DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  memberships         WorkspaceMembership[]
+  userRoles           UserRole[]
+  auditLogs           AuditLog[]
+  sessions            Session[]
+  directChatMessages  DirectChatMessage[]
+  ownedGroups         Group[]               @relation("ConversationOwner")
+  pushSubscriptions   PushSubscription[]
+  // ── 四層權限 (Backend-first 2026-05-21):
+  /// 我「監督」的 Teams(supervisor 角色)。
+  supervisedTeams     Team[]                @relation("TeamSupervisor")
+  /// 我「隸屬」的 Teams(普通成員)。
+  teamMemberships     TeamMembership[]
+  /// 被指派(預設只看自己的)TG 帳號。
+  accountAssignments  AccountAssignment[]
+  /// 由我發出去的代理人委派(主管把自己的帳號暫時讓人接管)。
+  delegationsGiven    AccountDelegation[]   @relation("DelegationFrom")
+  /// 我「拿到的」代理人委派(時效內可看接管人的帳號)。
+  delegationsReceived AccountDelegation[]   @relation("DelegationTo")
+  /// 我「核可」的代理人委派(grantedBy = admin/supervisor 簽核)。
+  delegationsGranted  AccountDelegation[]   @relation("DelegationGranted")
+  /// 我建立的快選回覆 / 跨專案任務(reserved tables — 本輪不接 UI)。
+  ownedQuickReplies   QuickReply[]          @relation("QuickReplyOwner")
+  createdScheduleRules ScheduleRule[]       @relation("ScheduleRuleCreatedBy")
+  createdConvTasks    ConversationTask[]    @relation("ConvTaskCreatedBy")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+// ─── WORKSPACE (TENANT) ──────────────────────────────────────
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Workspace-level UI configuration (JSON).
+  /// Shape: { menuConfig: { showMute: boolean, showClear: boolean, showDelete: boolean } }
+  /// All keys default to false when absent.
+  uiConfig  Json?
+
+  memberships           WorkspaceMembership[]
+  roles                 Role[]
+  communicationAccounts CommunicationAccount[]
+  groups                Group[]
+  auditLogs             AuditLog[]
+  mediaFiles            MediaFile[]
+  directChatMessages    DirectChatMessage[]
+  senderAvatars         SenderAvatar[]
+  tgFolders             TgFolder[]
+  // ── 四層權限 + reserved tables (Backend-first 2026-05-21):
+  teams                 Team[]
+  quickReplies          QuickReply[]
+  scheduleRules         ScheduleRule[]
+  conversationTasks     ConversationTask[]
+  workspaceTags         WorkspaceTag[]
+}
+
+// v2: Discord-style custom identity groups replace fixed WorkspaceRole enum
+model Role {
+  id              String  @id @default(cuid())
+  workspaceId     String
+  name            String
+  description     String?
+  isSystemDefault Boolean @default(false)
+
+  // ── Workspace Management ──
+  canEditWorkspaceSettings       Boolean @default(false)
+  canManageCommunicationAccounts Boolean @default(false)
+  canManageGroupRegistry         Boolean @default(false)
+  canManageRouting          Boolean @default(false)
+  canManageModerationRules       Boolean @default(false)
+
+  // ── Identity Group Management ──
+  canManageRoles       Boolean @default(false)
+  canAssignMemberRoles Boolean @default(false)
+
+  // ── Message Operations ──
+  canModerateMessages Boolean @default(false)
+  canSendManualMessages Boolean @default(false)
+  canDirectMessage      Boolean @default(false)
+
+  // ── Posts (公佈欄與交接) ──
+  /// 能設定文章/交接的查看與編輯權限（admin 預設 true）。
+  /// 沒這個權限的角色發文時不顯示權限設定欄位，預設全公開。
+  canManagePostPermissions Boolean @default(false)
+
+  // ── Viewing & Audit ──
+  canViewAllAuditLogs Boolean @default(false)
+  canViewOwnAuditLogs Boolean @default(false)
+
+  // ── 四層權限 (Backend-first 2026-05-21) ──
+  /// 「主管」權限:能看到所監督 Team 內所有帳號的對話。
+  /// 透過 Team.supervisorUserId 綁定;此 flag 在角色層級允許/不允許。
+  canSuperviseTeam    Boolean @default(false)
+  /// 能建立 / 撤銷帳號委派(AccountDelegation)— 主管臨時讓人接管帳號。
+  canDelegateAccounts Boolean @default(false)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userRoles UserRole[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+model WorkspaceMembership {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+}
+
+// ─── COMMUNICATION ACCOUNTS (TELEGRAM) ───────────────────────
+
+enum AccountStatus {
+  PENDING_AUTH
+  ACTIVE
+  DISCONNECTED
+  AUTH_ERROR
+  DISABLED
+}
+
+model CommunicationAccount {
+  id                String        @id @default(cuid())
+  workspaceId       String
+  platform          String        @default("telegram")
+  displayName       String? // 自訂暱稱（可選）；若未設定，UI 顯示用 telegramFirstName/LastName fallback
+  phoneNumber       String?
+  telegramUserId    String?       @unique
+  telegramFirstName String?
+  telegramLastName  String?
+  telegramUsername  String?
+  status            AccountStatus @default(PENDING_AUTH)
+  /// 四層權限 (Backend-first 2026-05-21):
+  /// 此 TG 帳號隸屬的「團隊」。null = 未隸屬(僅 admin 看得到、或被個別 AccountAssignment 指派)。
+  /// 主管(canSuperviseTeam + 所監督 Team)能看見隸屬其 Team 的所有帳號。
+  teamId            String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  workspace          Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team               Team?                    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  telegramSession    TelegramSession?
+  groupMemberships   AccountGroupMembership[]
+  directChatMessages DirectChatMessage[]
+  tgFolders          TgFolder[]
+  assignments        AccountAssignment[]
+  delegations        AccountDelegation[]
+  businessProfile    BusinessProfile?
+
+  @@unique([workspaceId, phoneNumber])
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([teamId])
+}
+
+model TelegramSession {
+  id               String    @id @default(cuid())
+  accountId        String    @unique
+  encryptedSession String
+  iv               String
+  authTag          String
+  apiId            Int
+  apiHash          String
+  lastConnectedAt  DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  account CommunicationAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+/// 進行中的 Telegram 認證會話，存在資料庫以支援多實例部署。
+/// Railway/雲端環境中 server 記憶體不共享，用 DB 儲存 phoneCodeHash + GramJS
+/// session string，確保「發送驗證碼」和「驗證」兩個請求即使落在不同實例
+/// (或同實例不同 Node.js process) 也能完成。
+model PendingAuthSession {
+  id            String   @id @default(cuid())
+  accountId     String   @unique
+  phoneNumber   String
+  phoneCodeHash String // GramJS sendCode 返回，用於 signIn 驗證
+  apiId         Int // 此帳號專用的 API ID
+  apiHash       String // 此帳號專用的 API Hash
+  /// GramJS StringSession.save() 序列化結果。phoneCodeHash 是綁特定 DC 的：
+  /// sendCode 時 Telegram 會 PHONE_MIGRATE_X 把 client 重導到正確 DC，
+  /// 之後 verify 必須用同一個 DC + authKey 才能 SignIn 成功，否則 Telegram
+  /// 會回 PHONE_CODE_EXPIRED（其實是「我這 DC 不認識這個 hash」）。
+  /// 把 client.session.save() 存進來，verify 用它重建 StringSession 即可
+  /// 無痛跨 instance / 跨 process 接力。
+  sessionString String?
+  expiresAt     DateTime @default(dbgenerated("now() + interval '30 minutes'"))
+  createdAt     DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+// ─── GROUPS ──────────────────────────────────────────────────
+
+enum GroupCategory {
+  CUSTOMER
+  INTERNAL
+  UNASSIGNED
+}
+
+enum ConversationStatus {
+  OPEN
+  SNOOZED
+  CLOSED
+}
+
+model Group {
+  id                      String             @id @default(cuid())
+  workspaceId             String
+  platform                String             @default("telegram")
+  platformGroupId         String
+  title                   String
+  side                    GroupCategory          @default(UNASSIGNED)
+  chatType                String             @default("GROUP") // GROUP | PRIVATE | CHANNEL
+  tags                    String[]           @default([])
+  customerName            String?
+  notes                   String?            @db.Text
+  isHidden                Boolean            @default(false)
+  isActive                Boolean            @default(true)
+  conversationOwnerId     String?
+  conversationStatus      ConversationStatus @default(OPEN)
+  conversationAssignedAt  DateTime?
+  conversationClosedAt    DateTime?
+  lastInboundAt           DateTime?
+  lastOutboundAt          DateTime?
+  /// P1 2026-05-20:置頂時間。null = 沒釘選;有值 = 釘在對話清單頂部,
+  /// 同樣置頂的依此 timestamp 排序(後釘的在最上面)。
+  /// 純 UI 概念,不影響業務邏輯(沒釘也是 OPEN 對話)。
+  conversationPinnedAt    DateTime?
+  /// P1 2026-05-20:Telegram 群組釘選訊息的 platform message id(字串型,
+  /// 跟 DCM.platformMessageId 對齊)。null = 沒釘選或還沒 refresh 過。
+  /// 由 bridge 透過 channels.GetFullChannel.pinnedMsgId 抓回;UI 用此 id
+  /// 去 DCM 找對應內容,顯示「📌 釘選訊息」banner。1:1 私訊不適用,維持 null。
+  pinnedPlatformMessageId String?
+  pinnedRefreshedAt       DateTime?
+  /// P2 2026-05-20:靜音通知截止時間。null = 沒靜音;有值且 > now = 靜音中,
+  /// 超過時間自動恢復通知;特殊值 year 9999 = 永久靜音。靜音時 sidebar SSE
+  /// 不累加 unread badge,但訊息仍會 archive,使用者進 chat 仍看得到。
+  notificationsMutedUntil DateTime?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  /// Cached group avatar (TG chat photo). Populated lazily by the bridge
+  /// worker's fetchMissingGroupAvatars job. Path is relative to CWD. Null
+  /// mediaPath + non-null refreshedAt = "fetched, chat has no photo"
+  /// (prevents repeat lookups). Served via
+  /// /api/workspaces/:ws/group-avatars/:platformGroupId.
+  avatarPath        String?
+  avatarMimeType    String?
+  avatarRefreshedAt DateTime?
+
+  workspace          Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversationOwner  User?                    @relation("ConversationOwner", fields: [conversationOwnerId], references: [id], onDelete: SetNull)
+  accountMemberships AccountGroupMembership[]
+  directChatMessages DirectChatMessage[]
+  // ── reserved tables (本輪不接 UI,只建表):
+  conversationTasks  ConversationTask[]
+
+  @@unique([workspaceId, platformGroupId])
+  @@index([workspaceId])
+  @@index([workspaceId, isActive])
+  @@index([workspaceId, isHidden])
+  @@index([workspaceId, chatType, conversationStatus])
+  @@index([conversationOwnerId])
+}
+
+/// P2 2026-05-20:原生 TG 資料夾(DialogFilter)同步。
+///
+/// TG 客戶端讓使用者把對話分到不同資料夾(「工作」「朋友」「廣告」⋯⋯)。
+/// 員工已經在 TG 端分好類了,Switchboard 同步過來作為 chat list 的 quick filter,
+/// 而不是逼員工重做一次分類。
+///
+/// Per-account 因為 TG 資料夾是綁帳號設定的;同 workspace 有多個 TG 帳號
+/// 時各自的資料夾不同(這也對齊 TG 行為)。
+/// tgFilterId = TG `DialogFilter.id`(整數,客戶端可見排序值)。
+/// groupIds[] = sync 當下解析出來的 Switchboard Group.id 清單;對應的 TG peer
+/// id 若在 Switchboard 沒登錄過(從未收過訊息)會自然漏掉,等下次有訊息時 bridge
+/// 會 auto-register 該 group + 下次 sync 自動補上。
+model TgFolder {
+  id          String   @id @default(cuid())
+  workspaceId String
+  accountId   String
+  tgFilterId  Int
+  title       String
+  emoticon    String?
+  /// Array of Switchboard Group.id 在這個資料夾的成員。
+  groupIds    String[]
+  syncedAt    DateTime @default(now())
+
+  workspace Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   CommunicationAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, accountId, tgFilterId])
+  @@index([workspaceId])
+  @@index([accountId])
+}
+
+model AccountGroupMembership {
+  id                 String   @id @default(cuid())
+  accountId          String
+  groupId            String
+  isListeningAccount Boolean  @default(false)
+  joinedAt           DateTime @default(now())
+
+  account CommunicationAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  group   Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, groupId])
+  @@index([groupId])
+  @@index([groupId, isListeningAccount])
+}
+
+// ─── PAIRINGS (CORE DOMAIN UNIT) ─────────────────────────────
+
+// ─── COMPLIANCE ──────────────────────────────────────────────
+
+/// Allows pairings to exclude specific global rules that don't apply to them.
+
+// ─── MESSAGES ────────────────────────────────────────────────
+
+enum MessageType {
+  TEXT
+  IMAGE
+  DOCUMENT
+  AUDIO
+  VIDEO
+  STICKER
+  // P0 expansion 2026-05-20 — TG 訊息類型補足:
+  /// .ogg 語音留言(有 waveform)。跟 AUDIO(音樂檔)區分:UI 用 audio player
+  /// + 🎙️ 標識。bridge 透過 DocumentAttributeAudio.voice=true 偵測。
+  VOICE
+  /// 圓形自拍視訊(最多 60s)。跟 VIDEO 區分:UI 套圓形 mask。
+  /// bridge 透過 DocumentAttributeVideo.roundMessage=true 偵測。
+  VIDEO_NOTE
+  /// 地理位置(static + live)。內容存在 mediaMetadata.geo {lat, lng, livePeriod?}。
+  LOCATION
+  /// 名片(vCard)。內容存在 mediaMetadata.contact {firstName, lastName, phone, userId?}。
+  CONTACT
+  /// 投票 / 測驗。內容存在 mediaMetadata.poll {question, options, totalVoters?, closed?}。
+  POLL
+  // P3 expansion 2026-05-20:
+  /// 動畫表情(🎲 🎯 🏀 ⚽ 🎰)。內容存在 mediaMetadata.dice {emoticon, value}。
+  /// TG 客戶端送出時會 server-side 計算 value(例:🎲 = 1~6, 🎰 = 1~64),
+  /// 我們只展示結果不重跑動畫。
+  DICE
+  // P3 expansion 2026-05-21:
+  /// TG 故事轉發(MessageMediaStory)。原 story 可能已過期/刪除,我們只記
+  /// peerId + storyId + 是否過期 placeholder。內容存在
+  /// mediaMetadata.story {storyId, peerId?, expired}。
+  /// UI 用「📖 轉發故事」placeholder 顯示,點開放上 t.me 的 story 連結。
+  STORY
+}
+
+/// On-disk media blob index. Bridge writes a row whenever it archives
+/// inbound TG media; outgoing uploads from operator composer also funnel
+/// through here. The actual bytes live under uploads/<workspaceId>/<filePath>.
+/// (Broker Message FK column dropped in H4 — DCM stores the resulting
+/// /api/media/<id> URL directly in its mediaUrl field.)
+model MediaFile {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  filePath     String
+  originalName String
+  mimeType     String
+  size         Int
+  uploadedAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+// Cache of Telegram profile photos for senders we've seen in this workspace.
+// Populated lazily by the bridge (see workers/telegram-bridge.ts
+// fetchMissingSenderAvatars) — one row per (workspace, platform user id). The
+// image bytes are stored on-disk under uploads/avatars/{id}.{ext}; the URL is
+// served through /api/workspaces/:id/avatars/:platformUserId.
+//
+// TTL / refresh: avatars refresh at most once every 7 days
+// (refreshedAt compared at fetch-time). When Telegram reports no profile
+// photo, we still insert the row with mediaPath=null to avoid repeat lookups.
+model SenderAvatar {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  /**
+   * Platform user id (raw Telegram user id as string).
+   */
+  platformUserId String
+  /**
+   * Telegram display name captured at fetch time, for back-reference.
+   */
+  displayName    String?
+  /**
+   * Local media path. null means "no avatar on Telegram" (fetched, nothing there).
+   */
+  mediaPath      String?
+  mimeType       String?
+  size           Int?
+  /**
+   * When we last successfully hit Telegram for this avatar (even if null).
+   */
+  refreshedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, platformUserId])
+  @@index([refreshedAt])
+}
+
+// ─── REVIEW QUEUE ────────────────────────────────────────────
+
+// ─── 公佈欄與交接 (取代舊 Tasks 模組) ────────────────────────
+
+/// 常駐公告：團隊共用 SOP / 規則 / 注意事項
+/// - 不分類（v1 簡化）
+/// - 軟刪除（isHidden=true）保留紀錄但 UI 不顯示
+/// - 預設全公開；admin 角色（有 canManagePostPermissions）可限制 viewer/editor
+
+/// 公告已讀回執：使用者展開公告時記錄；公告內容被編輯後 readAt 會比 contentEditedAt 舊 → 視為未讀
+
+/// 班別交接：每班結束時當班人員寫的訊息，下一班接班時看
+/// - 不能刪除（時間軸保留）
+/// - 已讀紀錄綁 User（依登入帳號）
+/// - 班別 + 時段是 snapshot（凍結當時的設定，後來 admin 改不影響）
+
+/// 已讀紀錄：每個 user 對每筆 handover 的展開時間
+
+/// 班別設定（admin 在系統管理可新增/編輯/停用，不能刪）
+/// 停用後新交接不能選此班別，但歷史交接的 shiftName/shiftRange snapshot 仍可正常顯示
+
+/// 共用附件（公佈欄、交接事項都能掛）
+
+// ─── DIRECT CHAT MESSAGES ────────────────────────────────
+
+/// Direction of a DirectChatMessage.
+///   OUTBOUND — CS staff sent it via the bridge (senderId is the User).
+///   INBOUND  — observed on TG and stored for archival (senderId is null;
+///              senderPlatformId / senderDisplayName identify the TG sender).
+///
+/// Added 2026-04-23 so the same table can back both outbound direct sends
+/// AND the archival path for groups that fall outside any pairing — 1:1
+/// chats and internal-only groups. Previously DirectChatMessage was
+/// outbound-only and the bridge silently dropped inbound messages with no
+/// pairing.
+enum ChatDirection {
+  INBOUND
+  OUTBOUND
+}
+
+model DirectChatMessage {
+  id                String        @id @default(cuid())
+  workspaceId       String
+  accountId         String
+  groupId           String
+  /// Null for INBOUND (from TG). Required for OUTBOUND (CS staff → TG).
+  senderId          String?
+  /// TG user id of the INBOUND sender, null for OUTBOUND.
+  senderPlatformId  String?
+  /// TG display name of the INBOUND sender, null for OUTBOUND.
+  senderDisplayName String?
+  /// Platform message id this message is a reply to (INBOUND reply context).
+  replyToPlatformId String?
+  direction         ChatDirection @default(OUTBOUND)
+  content           String        @db.Text
+  messageType       MessageType   @default(TEXT)
+  mediaUrl          String?
+  mediaType         String?
+  mediaFileName     String?
+  /// 結構化 media payload(bytes-less 類型用):LOCATION 存 {geo:{lat,lng}},
+  /// CONTACT 存 {contact:{firstName,lastName,phone}}, POLL 存 {poll:{question,options}}。
+  /// byte 類型(IMAGE/DOCUMENT/AUDIO/VIDEO/VOICE/VIDEO_NOTE/STICKER)用 mediaUrl 不用這欄。
+  mediaMetadata     Json?
+  /// P2 2026-05-20:轉發來源 metadata。null = 原生訊息(非轉發)。
+  /// Shape: { senderName?: string, senderPlatformUserId?: string, channelTitle?: string,
+  ///          channelPlatformId?: string, originalMessageId?: string, date?: string ISO }
+  /// 從 Telegram MessageFwdHeader 抽出,UI 顯示「Forwarded from X」header。
+  forwardedFrom     Json?
+  /// P2 2026-05-20:TG forum topic id(僅 supergroup with forum 開啟才有)。
+  /// 從 message.replyTo.replyToTopId 抽出;null = 非 forum 群組或在 General topic。
+  /// MVP 階段 UI 只顯示「🧵 Topic #N」chip 提供 context — 不做 topic 切分主視圖。
+  topicId           Int?
+  /// P3 2026-05-20:Telegram channel post 觀看數。一般群組 / 私訊不會有(null)。
+  /// 從 message.views 直接抽。UI 顯示在 footer 旁「👁 N」小字。
+  /// 注意:view count 是 TG 服務端統計,我們只在 archive 當下捕捉一次;
+  /// 後續對方 client 看了不會即時更新到 DCM(要 polling 才行,先不做)。
+  viewCount         Int?
+  /// P3 2026-05-20:TG quote reply 的「引用片段」文字。null = 一般回覆(沒選引用)。
+  /// 用戶在 TG 客戶端回覆時可以拖選原訊息一段文字、只引用那段(2023+ 新功能)。
+  /// 我們在 reply preview 中顯示時優先用 quoteText(若有),否則退回 reply
+  /// 目標 DCM 的完整 content。
+  quoteText         String?
+  sentViaTelegram   Boolean       @default(false)
+  platformMessageId String?
+  /// TG emoji reactions cached from updateMessageReactions events.
+  /// Shape: Array<{ emoji: string, count: number, chosen: boolean }>
+  /// 「chosen」是 bridge 端的 listening account 自己有沒有按這個 emoji；
+  /// 不同帳號池成員的 chosen 會看不出來（受限於只能看到 listener 視角）。
+  /// null = 還沒收過任何 reaction 事件、或沒人 react。
+  reactions         Json?
+  /// 軟刪除：用戶從 Switchboard（或 TG）撤回訊息後，在 UI 顯示「已刪除」+ 刪除線。
+  /// 保留原本 content 當作審計證據（spec 2026-04-23）。
+  isDeleted         Boolean       @default(false)
+  deletedAt         DateTime?
+  /// 編輯時間戳記。null = 從未編輯；UI 顯示「已編輯」標記。
+  editedAt          DateTime?
+  /// 真實已讀回執 (2026-05-21 Backend-first):
+  /// deliveredAt — TG 對方 client 收到此 OUTBOUND 訊息(2 灰勾)。
+  /// readAt      — TG 對方已讀此 OUTBOUND 訊息(2 藍勾)。
+  /// 兩者皆 null = 純送出但對方未讀(1 灰勾);bridge 透過 raw update
+  /// UpdateReadHistoryOutbox/Inbox 回填,INBOUND 訊息不適用此兩欄。
+  deliveredAt       DateTime?
+  readAt            DateTime?
+  /// 訊息實體 (2026-05-21 TG parity round):TG `message.entities[]` 完整轉存。
+  /// Shape: Array<{ type, offset, length, ...payload }>
+  ///   type ∈ "bold" | "italic" | "underline" | "strikethrough" | "spoiler" |
+  ///          "code" | "pre" | "blockquote" | "mention" | "mention_name" |
+  ///          "text_url" | "url" | "email" | "phone" | "hashtag" | "cashtag" |
+  ///          "bot_command" | "custom_emoji" | "bank_card"
+  ///   payload e.g. text_url → { url }, mention_name → { userId }, custom_emoji → { documentId }
+  /// null = 純文字無格式;UI render 時退回 raw content。bridge 從 message.entities
+  /// 直接 normalize(TL constructor 名稱去掉 "MessageEntity" 並 snake_case)。
+  entities          Json?
+  /// Album/media group 共享 id (2026-05-21 TG parity round):
+  /// TG 用戶在 client 端「一次送 N 張圖」時這 N 筆 message 共享同一個 grouped_id;
+  /// 我們存原始整數的字串表現。同 (groupId, groupedId) 的訊息要被 UI 合併渲染成
+  /// 單一 album bubble(carousel)。null = 單一訊息,不屬於 album。
+  groupedId         String?
+  /**
+   * 2026-05-21 訊息按鈕 (inline keyboard):TG `message.replyMarkup` 正規化後存。
+   * Shape: { type: "inline" | "reply", rows: Array<Array<{ text, kind, data?, url? }>> }
+   *   kind = "callback" → data 是 base64 編碼的 callback bytes(點擊送 GetBotCallbackAnswer)
+   *   kind = "url"      → url 是要開的連結
+   *   kind = "other"    → 不支援的類型(buy/game/switch_inline…),UI 顯示但 disabled
+   * null = 此訊息沒有按鈕。bot / 服務帳號的訊息常帶這個。
+   */
+  replyMarkup       Json?
+  /**
+   * 2026-05-21 AI 副駕(round 4):pgvector 1536-dim embedding(對齊 OpenAI
+   * text-embedding-3-small 跟 Anthropic 默認)。本欄位由 setup-pgvector.ts 真正
+   * 加上 `vector(1536)` 型別 + HNSW index;Prisma 用 Unsupported 宣告以維持 schema
+   * 完整、查詢時走 raw SQL(prisma 6 還沒原生支援 vector)。
+   * null = 還沒 embedded(背景 job 會逐步補)。
+   */
+  embedding         Unsupported("vector(1536)")?
+  /// 訊息釘選 (message pin):CS 把對話視窗裡的重要訊息釘到頂端。
+  /// null = 未釘;有值 = 釘選時間(頂端釘選列依此倒序,最新釘的在最上)。
+  /// 這是 Switchboard 內部標記(不同步回 TG,避免騷擾客戶);可釘多則、可批量。
+  pinnedAt          DateTime?
+  createdAt         DateTime      @default(now())
+
+  workspace    Workspace                        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account      CommunicationAccount             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  group        Group                            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sender       User?                            @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  editHistory  DirectChatMessageEditHistory[]
+  // ── reserved tables (本輪不接 UI,只建表):
+  translations ConversationMessageTranslation[]
+  tasks        ConversationTask[]               @relation("MessageTask")
+
+  @@index([workspaceId, groupId, createdAt(sort: Desc)])
+  @@index([workspaceId, accountId])
+  @@index([groupId, createdAt])
+  @@index([accountId, createdAt])
+  @@index([senderId])
+  @@index([groupId, platformMessageId])
+  /// Album lookup:UI 渲染時要把同個 group 內同 groupedId 的訊息一次撈起來合成
+  /// album bubble。`@@index([groupId, groupedId])` 直接服務這個 access pattern。
+  @@index([groupId, groupedId])
+  /// 釘選列查詢:撈某對話所有已釘訊息(pinnedAt 非 null)依時間倒序。
+  @@index([groupId, pinnedAt])
+}
+
+/// 編輯歷史 — 鏡射 MessageEditHistory（廣播 pipeline）的設計給 DCM 用。
+/// 每次 DCM.content 改變前先把舊值塞進來；UI 拉 history dialog 時依時間倒序展示。
+model DirectChatMessageEditHistory {
+  id              String   @id @default(cuid())
+  dcmId           String
+  previousContent String   @db.Text
+  editedAt        DateTime @default(now())
+
+  message DirectChatMessage @relation(fields: [dcmId], references: [id], onDelete: Cascade)
+
+  @@index([dcmId, editedAt])
+}
+
+// ─── REVIEW TEMPLATES ───────────────────────────────────
+
+// ─── PUSH SUBSCRIPTIONS ─────────────────────────────────
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── 四層權限 (Backend-first 2026-05-21) ────────────────────────
+//
+// 模型:
+//   1. 系統管理員(User.isSystemAdmin)   — 全部可見
+//   2. 主管(canSuperviseTeam + Team.supervisorUserId) — 監督 Team 內所有 TG 帳號
+//   3. 員工(default)                       — 只看 AccountAssignment 指派的帳號
+//   4. 代理人(AccountDelegation,有時效)    — 暫時接管別人的帳號
+//
+// 為什麼要這層 - AJ 的原則:員工不該在 CRM 看見不歸他的對話;主管要能監督
+// 但不該 default 看全工作區;代理人要能臨時接手且記錄、自動到期失效。
+
+/// 「團隊」 — workspace 內的中介組織單位。
+/// supervisorUserId 是該 Team 的「主管」(canSuperviseTeam 角色才有效)。
+/// 一名員工可隸屬多個 Team(TeamMembership);一個 TG 帳號隸屬至多一個 Team
+/// (CommunicationAccount.teamId)。
+model Team {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  name             String
+  supervisorUserId String?
+  sortOrder        Int      @default(0)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  workspace  Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  supervisor User?                  @relation("TeamSupervisor", fields: [supervisorUserId], references: [id], onDelete: SetNull)
+  members    TeamMembership[]
+  accounts   CommunicationAccount[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@index([supervisorUserId])
+}
+
+model TeamMembership {
+  id        String   @id @default(cuid())
+  teamId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([userId])
+}
+
+/// 員工 ↔ TG 帳號「歸屬」。一名員工默認只看到自己被指派的帳號。
+/// isPrimary 只是 UI hint(該員工的「主帳號」用於默認 compose chooser),
+/// 業務邏輯不依賴此 flag — 純 visibility 用 (accountId,userId) 存在即可見。
+model AccountAssignment {
+  id        String   @id @default(cuid())
+  accountId String
+  userId    String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  account CommunicationAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, userId])
+  @@index([userId])
+}
+
+/// 代理人時效接管 — 主管(grantedBy)把 fromUser 的帳號暫時讓 toUser 接管。
+/// 時效視窗 = [startsAt, expiresAt];revokedAt 提前撤銷;
+/// 「有效中」= now() 在 [startsAt, expiresAt] 且 revokedAt = null。
+model AccountDelegation {
+  id          String    @id @default(cuid())
+  accountId   String
+  fromUserId  String
+  toUserId    String
+  grantedById String
+  reason      String?   @db.Text
+  startsAt    DateTime
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  account   CommunicationAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  fromUser  User                 @relation("DelegationFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser    User                 @relation("DelegationTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  grantedBy User                 @relation("DelegationGranted", fields: [grantedById], references: [id], onDelete: Cascade)
+
+  @@index([toUserId, expiresAt])
+  @@index([accountId])
+  @@index([fromUserId])
+}
+
+// ─── 預留資料表 — 建表佔位,本輪 UI 不接 (2026-05-21) ──────────
+//
+// 全部 nullable / @default,所以 db push 對既有資料零破壞。
+// 之後逐項接 UI 時不需要再改 schema,只需新增 API + 元件。
+
+/// 快選回覆 / 宇宙語錄 — 操作員預存 SOP 片段,composer 用 shortcut 直接帶入。
+/// scope 控制誰看得到;PRIVATE = 只有 owner 自己;TEAM = owner 所屬 Team 成員;
+/// WORKSPACE = 整個工作區共享(SOP 模板用)。
+enum QuickReplyScope {
+  PRIVATE
+  TEAM
+  WORKSPACE
+}
+
+enum ScheduleBehaviorKind {
+  REMINDER
+  FOLLOW_UP
+  BROADCAST
+  MAINTENANCE
+  CUSTOM
+}
+
+enum ScheduleRecurrence {
+  DAILY
+  WEEKLY
+  MONTHLY
+  INTERVAL
+}
+
+model QuickReply {
+  id          String          @id @default(cuid())
+  workspaceId String
+  ownerUserId String?
+  /**
+   * Phase B (2026-05-21):若這條 QuickReply 對應某 TG account 的 server-side
+   * shortcut(由 `messages.GetQuickReplies` pull 進來),tgShortcutId 帶 TG 那邊的
+   * shortcut id(整數)。本地建的(Phase A 直接 Switchboard 維護的)→ null。
+   *
+   * 同一 Switchboard QuickReply 可對應多個 TG 帳號的 shortcut?MVP 假設「一對一」,
+   * 之後若有同樣 shortcut 文字在多個 TG 帳號 sync 上來,會建多筆 Switchboard row(同
+   * shortcut 字串但 ownerUserId / tgAccountId 不同 — 用 `@@unique` 防同帳號重複)。
+   */
+  tgShortcutId Int?
+  /**
+   * Phase B:若這條同步自特定 TG account,記 accountId(同 server-side shortcut
+   * 隸屬該 account)。本地 QuickReply(Phase A)→ null。
+   */
+  tgAccountId  String?
+  scope       QuickReplyScope @default(PRIVATE)
+  shortcut    String
+  title       String
+  body        String          @db.Text
+  tags        String[]        @default([])
+  sortOrder   Int             @default(0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner     User?     @relation("QuickReplyOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  scheduleRules ScheduleRule[]
+
+  @@index([workspaceId, scope])
+  @@index([ownerUserId])
+  /**
+   * 同個 TG account 一個 shortcut 字串只能對一個 Switchboard QuickReply row(避免 sync 重複)。
+   * tgAccountId null 時不參與此 unique(本地 row 不限同 shortcut 字串)。
+   */
+  @@unique([tgAccountId, shortcut])
+}
+
+/// Workspace-level recurring behavior definitions. These rows are definitions
+/// only; an executor/worker can consume them later without changing the UX.
+model ScheduleRule {
+  id              String               @id @default(cuid())
+  workspaceId     String
+  createdByUserId String?
+  quickReplyId    String?
+  name            String
+  description     String?              @db.Text
+  behaviorKind    ScheduleBehaviorKind @default(REMINDER)
+  recurrence      ScheduleRecurrence
+  timezone        String               @default("Asia/Taipei")
+  timeOfDay       String?
+  daysOfWeek      Int[]                @default([])
+  dayOfMonth      Int?
+  intervalEvery   Int?
+  intervalUnit    String?
+  startsAt        DateTime?
+  endsAt          DateTime?
+  lastRunAt       DateTime?
+  nextRunAt       DateTime?
+  isActive        Boolean              @default(true)
+  metadata        Json?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy     User?       @relation("ScheduleRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  quickReply    QuickReply? @relation(fields: [quickReplyId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, isActive])
+  @@index([workspaceId, nextRunAt])
+  @@index([createdByUserId])
+  @@index([quickReplyId])
+}
+
+/**
+ * 2026-05-21 TG Business Phase B:
+ * 員工 TG 帳號的「商務」設定(原生 TG Business Premium 提供):
+ *   - awayMessage:離線自動回覆(營業時間外)
+ *   - greetingMessage:首次訊息自動歡迎詞
+ *   - workHours:營業時間表(weekly 結構)
+ *   - openingHours timezone offset (TG 用 minutes from UTC)
+ *
+ * 一個 CommunicationAccount 一筆。本地存,bridge 透過 `account.UpdateBusiness*`
+ * 推到 TG;TG 端變更會走 `account.GetFull` 或登入時拉一次回填(本回合先支援推,
+ * 即時雙向 sync 等之後 cron pull)。
+ *
+ * 需求門檻:TG Premium 帳號才能用 Business 功能;非 Premium 寫入會回 PREMIUM_ACCOUNT_REQUIRED。
+ */
+model BusinessProfile {
+  id                String   @id @default(cuid())
+  accountId         String   @unique
+  awayMessage       String?  @db.Text
+  /// 缺席訊息僅在這些時段觸發。enum 字串:"always" | "outside_work_hours" | "manual"
+  awayMessageSchedule String? @default("outside_work_hours")
+  greetingMessage   String?  @db.Text
+  /// 對「N 天沒互動」的客戶觸發 greeting(預設 7)。
+  greetingInactivityDays Int? @default(7)
+  /// 結構:{ days: Array<{ openMinutes: number; closeMinutes: number }> }
+  /// openMinutes/closeMinutes = 從週一 00:00 起算的分鐘(TG 設計);可跨午夜。
+  workHours         Json?
+  /// UTC offset in minutes(e.g. UTC+8 Taipei = 480)。TG `BusinessWorkHours.timezoneId` 對應這。
+  workHoursUtcOffset Int?
+  /// "已開啟" 開關 — 暫時關掉 away/greeting 不必清空設定。
+  isEnabled         Boolean  @default(true)
+  /// 最後一次成功推到 TG 的時間;失敗 sync 不更新此欄位。
+  lastSyncedAt      DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  account CommunicationAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}
+
+/// 翻譯快取 + 稽核 — 每個 (DCM, targetLang) 唯一,避免對同訊息重打翻譯 API。
+/// 之後接前端 composer「翻譯」按鈕時,先 lookup;沒有再呼叫 /api/translate
+/// 並寫回此表。provider 紀錄當下用的服務(google / deepl / claude…)。
+model ConversationMessageTranslation {
+  id             String   @id @default(cuid())
+  messageId      String
+  targetLang     String
+  translatedText String   @db.Text
+  provider       String
+  createdAt      DateTime @default(now())
+
+  message DirectChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, targetLang])
+  @@index([messageId])
+}
+
+/// 跨專案 SOP 任務 hook — 從對話建立任務(本地或同步到外部系統)。
+/// MVP 階段只本地 (LOCAL_DRAFT);之後接外部系統時透過 externalSystem +
+/// externalRef + payload 記錄綁定。本輪僅 schema 落地,不打包 SOP 專案串接。
+enum ConversationTaskStatus {
+  LOCAL_DRAFT
+  SYNCED
+  DONE
+  CANCELLED
+}
+
+model ConversationTask {
+  id             String                 @id @default(cuid())
+  workspaceId    String
+  conversationId String
+  messageId      String?
+  createdById    String
+  title          String
+  note           String?                @db.Text
+  status         ConversationTaskStatus @default(LOCAL_DRAFT)
+  externalSystem String?
+  externalRef    String?
+  payload        Json?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversation Group              @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message      DirectChatMessage? @relation("MessageTask", fields: [messageId], references: [id], onDelete: SetNull)
+  createdBy    User               @relation("ConvTaskCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([conversationId])
+  @@index([createdById])
+}
+
+/// 工作區獨立的標籤詞彙表(Group.tags / Customer.tags 之後遷移到此)。
+/// 純詞彙管理 — 之後 UI 可在 settings 增/刪/重新命名,套用到對話的 tags 維持
+/// 自由字串陣列以保相容,只有 WorkspaceTag 是「主資料」。
+model WorkspaceTag {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  color       String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+// ─── AUDIT LOG ───────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String?
+  action      String
+  entityType  String
+  entityId    String
+  details     Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, entityType, createdAt(sort: Desc)])
+  @@index([workspaceId, userId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([userId, createdAt])
+  @@index([workspaceId, action, createdAt])
+  @@index([action, entityType])
+}
