@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# Switchboard pre-push guard — cross-platform thin wrapper.
+#
+# 安裝：
+#   git config core.hooksPath .githooks
+#   chmod +x .githooks/pre-push       # macOS / Linux
+#   （Windows + Git for Windows 不需要 chmod，sh 會自動處理）
+#
+# 緊急跳過：git push --no-verify
+#
+# 實際的檢查邏輯在 .githooks/pre-push.mjs（純 Node.js，跨平台）。
+# 這隻 sh 只是 git 預設讀的入口，把球丟給 node。
+exec node "$(dirname "$0")/pre-push.mjs" "$@"

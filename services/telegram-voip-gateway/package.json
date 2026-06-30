@@ -1,0 +1,15 @@
+{
+  "name": "@switchboard/telegram-voip-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Switchboard Telegram VoIP gateway C1 outgoing ringing spike. This does not provide browser media bridging.",
+  "scripts": {
+    "dev": "cd ../.. && tsx services/telegram-voip-gateway/src/server.ts",
+    "typecheck": "cd ../.. && tsc -p services/telegram-voip-gateway/tsconfig.json --noEmit",
+    "test": "cd ../.. && tsx services/telegram-voip-gateway/src/test.ts",
+    "qa:c1": "cd ../.. && tsx services/telegram-voip-gateway/tools/qa-c1-outgoing-ringing.ts",
+    "qa:c2": "cd ../.. && tsx services/telegram-voip-gateway/tools/qa-c2-incoming-detection.ts",
+    "qa:c3": "cd ../.. && tsx services/telegram-voip-gateway/tools/qa-c3-one-way-audio.ts",
+    "qa:c4": "cd ../.. && tsx services/telegram-voip-gateway/tools/qa-c4-full-duplex-voice.ts"
+  }
+}

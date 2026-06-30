@@ -1,0 +1,155 @@
+# Switchboard 生產環境 Docker Compose
+#
+# 使用方式：
+#   1. cp .env.production.example .env.production
+#   2. 用 scripts/deploy/generate-secrets.sh 產生隨機金鑰，填入 .env.production
+#   3. docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+#   4. 首次啟動執行資料庫初始化：
+#      docker compose --env-file .env.production -f docker-compose.prod.yml --profile migrate run --rm migrate
+#      docker compose --env-file .env.production -f docker-compose.prod.yml exec app npx tsx prisma/seed.ts
+#   5. 用 Nginx / Caddy 做 HTTPS 反向代理到 127.0.0.1:3000
+
+services:
+  # ── PostgreSQL 資料庫 ─────────────────────────────
+  db:
+    image: postgres:16.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: switchboard
+      POSTGRES_USER: switchboard
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?請設定 DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U switchboard -d switchboard"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    # 預設不對宿主機暴露 port — 容器之間透過 internal network 直連即可。
+    # 若需從宿主機 psql / 備份匯出，臨時加上：
+    #   ports:
+    #     - "127.0.0.1:5432:5432"
+    # 並在使用完畢後移除。
+
+  # ── Next.js 應用程式 ──────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    stop_grace_period: 30s
+    volumes:
+      - uploads:/app/uploads
+    security_opt:
+      - "no-new-privileges:true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    ports:
+      # 只綁定 localhost，用外部 Nginx/Caddy 做 HTTPS 反向代理
+      # （測試階段暫時開放 LAN 以供其他裝置存取；正式請改回 127.0.0.1）
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://switchboard:${DB_PASSWORD}@db:5432/switchboard?schema=public
+      SESSION_SECRET: ${SESSION_SECRET:?請設定 SESSION_SECRET}
+      # TELEGRAM_API_ID / TELEGRAM_API_HASH 已廢除 — 每個 TG 帳號於 UI 自行填入
+      TELEGRAM_SESSION_KEY: ${TELEGRAM_SESSION_KEY:?請設定 TELEGRAM_SESSION_KEY}
+      INTERNAL_SECRET: ${INTERNAL_SECRET:?請設定 INTERNAL_SECRET}
+      BRIDGE_URL: http://bridge:3001
+      BRIDGE_PORT: 3001
+      APP_INTERNAL_URL: http://app:3000
+      TELEGRAM_VOIP_GATEWAY_URL: ${TELEGRAM_VOIP_GATEWAY_URL:-}
+      TELEGRAM_VOIP_GATEWAY_SECRET: ${TELEGRAM_VOIP_GATEWAY_SECRET:-}
+      UPLOAD_DIR: /app/uploads
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      BUG_REPORT_BOT_TOKEN: ${BUG_REPORT_BOT_TOKEN:-}
+      BUG_REPORT_CHAT_ID: ${BUG_REPORT_CHAT_ID:-}
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ── Telegram Bridge Worker ────────────────────────
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.bridge
+    restart: unless-stopped
+    stop_grace_period: 30s
+    volumes:
+      - uploads:/app/uploads
+    security_opt:
+      - "no-new-privileges:true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://switchboard:${DB_PASSWORD}@db:5432/switchboard?schema=public
+      # TG API 憑證儲存於 TelegramSession 表(每帳號獨立);bridge 只需能解密
+      TELEGRAM_SESSION_KEY: ${TELEGRAM_SESSION_KEY}
+      INTERNAL_SECRET: ${INTERNAL_SECRET}
+      APP_INTERNAL_URL: http://app:3000
+      BRIDGE_PORT: 3001
+      UPLOAD_DIR: /app/uploads
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      AUDIT_LOG_RETENTION_DAYS: ${AUDIT_LOG_RETENTION_DAYS:-90}
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ── 資料庫 Migration（一次性工作，profile: migrate）────
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+    stop_grace_period: 30s
+    security_opt:
+      - "no-new-privileges:true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://switchboard:${DB_PASSWORD}@db:5432/switchboard?schema=public
+    networks:
+      - internal
+    profiles:
+      - migrate
+
+volumes:
+  pgdata:
+  uploads:
+
+networks:
+  internal:
+    driver: bridge

@@ -1,0 +1,43 @@
+# ── Telegram Bridge Worker ────────────────────────────
+FROM node:22-alpine AS deps
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY prisma ./prisma/
+COPY prisma.config.ts tsconfig.json ./
+
+RUN npm ci --ignore-scripts
+# @prisma/dev 7.x 透過 require() 載入 zeptomatch (ESM);Node 20 需此 flag
+ENV NODE_OPTIONS="--experimental-require-module"
+RUN npx prisma generate
+
+# ── 生產環境 ─────────────────────────────────────────
+FROM node:22-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+RUN addgroup --system --gid 1001 bridge \
+    && adduser --system --uid 1001 -G bridge bridge
+
+# 安裝 wget（用於 healthcheck）
+RUN apk add --no-cache wget
+
+# 複製並設定正確 ownership
+COPY --chown=bridge:bridge --from=deps /app/node_modules ./node_modules
+COPY --chown=bridge:bridge prisma ./prisma
+COPY --chown=bridge:bridge src/lib ./src/lib
+COPY --chown=bridge:bridge workers ./workers
+COPY --chown=bridge:bridge tsconfig.json ./
+
+# 確保 /app/uploads 可寫（avatar / media 下載寫入處）
+# Docker volume 掛進來時會繼承 image 內這路徑的擁有者 — 必須在 USER bridge
+# 之前建立並 chown，否則掛上 volume 之後 bridge user 無權 mkdir 子目錄。
+RUN mkdir -p /app/uploads && chown -R bridge:bridge /app/uploads
+
+USER bridge
+
+EXPOSE 3001
+ENV BRIDGE_PORT=3001
+
+CMD ["npx", "tsx", "workers/telegram-bridge.ts"]

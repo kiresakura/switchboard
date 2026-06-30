@@ -1,0 +1,57 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing / coverage
+/coverage
+
+# next.js
+/.next/
+/out/
+/build
+
+# misc
+.DS_Store
+*.pem
+*.key
+*.p12
+*.pfx
+
+# env files — only *.example may be committed
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# ── data & secrets that must NEVER be committed ──────────────
+# database dumps / backups
+/backups/
+*.sql.gz
+*.dump
+*.sqlite
+*.db
+# runtime logs
+/logs/
+*.log
+# uploads / received media (may contain personal data)
+/uploads/
+# screenshots / QA captures / reports (may contain real UI data)
+/screenshots/
+/qa-output*/
+*.pptx
+/docs/reports/*.pdf
+# local agent / editor state
+/.claude/
+/.vscode/
+# Telegram session artifacts
+*.session
+*.session.json
