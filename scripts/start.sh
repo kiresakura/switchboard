@@ -4,7 +4,7 @@
 
 cd "$(dirname "$0")/.."
 
-echo "🚀 啟動 Switchboard 客服管理系統..."
+echo "🚀 啟動 Switchboard 客戶互動平台..."
 echo ""
 
 # 啟動 PostgreSQL

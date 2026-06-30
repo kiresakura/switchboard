@@ -73,7 +73,7 @@ export function LoginForm() {
           Switchboard
         </h1>
         <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-          跨平台通訊整合客服管理系統
+          全通路客戶互動平台
         </p>
       </div>
 

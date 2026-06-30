@@ -167,7 +167,7 @@ export default function LoginPage() {
             Switchboard
           </h1>
           <p className="mt-3 text-[15px] leading-relaxed text-[var(--text-secondary)]">
-            跨平台通訊整合客服管理系統
+            全通路客戶互動平台
           </p>
         </div>
 
