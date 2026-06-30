@@ -26,8 +26,8 @@ type RouteParams = { params: Promise<{ workspaceId: string }> };
  *   ↳ SSE streaming response(Vercel AI SDK 規格)
  *
  * 設計:
- *   - LLM provider 由 src/lib/ai/provider.ts 決定。Anthropic 路徑保留 AI SDK
- *     streamText;Codex 路徑走 ChatGPT Codex Responses API 並轉成 AI SDK UI stream。
+ *   - LLM provider 由 src/lib/ai/provider.ts 決定;使用 Anthropic 經由
+ *     AI SDK streamText 串流回傳。
  *   - 對話 context:撈 groupId 最近 20 則 DCM 餵進 system prompt。
  *   - 不做工具呼叫(MVP)— 純文字建議。下回合接 tool calls(查客戶資料 / 發訊息 / 標籤)。
  *   - pgvector embedding 走 setup-pgvector.ts 後另開「historical similar conversations」工具。
