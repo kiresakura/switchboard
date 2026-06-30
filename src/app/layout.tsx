@@ -37,8 +37,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Switchboard - 客服管理系統",
-  description: "跨平台通訊整合客服管理系統",
+  title: "Switchboard - 客戶互動平台",
+  description: "全通路客戶互動平台",
   // 不宣告 manifest / apple-web-app，避免瀏覽器顯示「安裝 App」提示
   icons: {
     icon: "/favicon.svg",

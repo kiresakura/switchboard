@@ -4,7 +4,7 @@
 
 cd "$(dirname "$0")/.."
 
-echo "⏹️  關閉 Switchboard 客服管理系統..."
+echo "⏹️  關閉 Switchboard 客戶互動平台..."
 
 # 停止 Next.js dev server
 echo "🌐 停止網頁伺服器..."
