@@ -2,8 +2,8 @@
 
 ## Reporting a Vulnerability
 
-Please report security issues privately to **<security@example.com>** (replace
-with your contact). Do not open public issues for undisclosed vulnerabilities.
+Please report security issues privately via [GitHub private vulnerability reporting](https://github.com/kiresakura/switchboard/security/advisories/new).
+Do not open public issues for undisclosed vulnerabilities.
 We aim to acknowledge reports within 72 hours.
 
 ## Deploying safely
