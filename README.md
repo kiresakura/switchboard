@@ -42,8 +42,9 @@ pipeline and UI.
   bcrypt auth with timing-attack mitigation, per-account login throttling, a
   runtime *secret-guard* that refuses to boot on placeholder secrets, strict
   security headers + HSTS, and access-controlled media.
-- 🤖 **AI assist** — pluggable LLM provider for intent/sentiment/urgency analysis
-  of inbound messages.
+- 🤖 **AI assist** — a Claude copilot (`claude-haiku-4-5` via the Vercel AI SDK)
+  drafts replies into the agent's reply box and tags inbound conversations by
+  intent, sentiment and urgency.
 - 📱 **Mobile-first PWA** — installable, offline-aware, safe-area-padded,
   ≥44px tap targets; built for agents on phones.
 
@@ -131,6 +132,10 @@ See [`SECURITY.md`](./SECURITY.md) before deploying.
   before deploying it against real accounts.
 - The voice dependencies (`py-tgcalls`, `ntgcalls`, `telethon`, `aiortc`) carry
   their own licenses — review them before redistribution.
+
+## Provenance
+
+Solo project by [@kiresakura](https://github.com/kiresakura).
 
 ## License
 
