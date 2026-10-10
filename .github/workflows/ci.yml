@@ -13,10 +13,10 @@ concurrency:
 
 jobs:
   check:
-    name: Typecheck & Lint
+    name: Typecheck, Lint & Test
     runs-on: ubuntu-latest
 
-    # tsc 與 eslint 不會連線資料庫，但 Prisma schema 的 datasource 讀 env("DATABASE_URL")，
+    # tsc、eslint 與單元測試都不會連線資料庫，但 Prisma schema 的 datasource 讀 env("DATABASE_URL")，
     # 給一個 dummy 連線字串，確保 `prisma generate` 在乾淨環境也不會因缺少 env 而報錯。
     env:
       DATABASE_URL: postgresql://user:password@localhost:5432/switchboard
@@ -39,3 +39,7 @@ jobs:
 
       - name: Typecheck & Lint
         run: npm run check
+
+      # 單元測試（vitest）：純邏輯 + mock，不需要資料庫、Telegram 帳號或任何金鑰
+      - name: Unit tests
+        run: npm test
