@@ -10,7 +10,12 @@ function loadDatabaseUrl(): string {
     const content = fs.readFileSync(envPath, "utf-8");
     for (const line of content.split("\n")) {
       const match = line.match(/^DATABASE_URL\s*=\s*"?([^"]*)"?\s*$/);
-      if (match) return match[1];
+      if (match) {
+        // 有 prisma.config.ts 時 Prisma CLI 不會自動載入 .env，
+        // 但 schema.prisma 的 env("DATABASE_URL") 只讀 process.env，所以要寫回去。
+        process.env.DATABASE_URL = match[1];
+        return match[1];
+      }
     }
   }
   return "";
