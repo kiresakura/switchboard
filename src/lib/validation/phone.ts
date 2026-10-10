@@ -5,7 +5,7 @@
  *   - 接受使用者各種輸入方式（含空格、破折號、括號），自動清乾淨
  *   - 預設國家：台灣（+886）。台灣本地式 09XX 自動補成 +886 9XX
  *   - 其他國家不假設 — 必須使用者明確帶 + 國碼
- *   - 嚴格遵守 E.164：總長 8–15 位數字（不含 +），第一位非 0
+ *   - 嚴格遵守 E.164：總長 7–15 位數字（不含 +），第一位非 0
  */
 
 const TAIWAN_CC = "886";
@@ -85,7 +85,7 @@ export function validatePhone(raw: string): PhoneValidationResult {
   if (!m) {
     const digits = normalized.replace(/\D/g, "");
     if (digits.length < 7) {
-      return { ok: false, error: `太短了 — 國際格式至少 8 位數字（目前 ${digits.length} 位）` };
+      return { ok: false, error: `太短了 — 國際格式至少 7 位數字（目前 ${digits.length} 位）` };
     }
     if (digits.length > 15) {
       return { ok: false, error: `太長了 — 國際格式最多 15 位數字（目前 ${digits.length} 位）` };

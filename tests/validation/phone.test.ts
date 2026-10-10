@@ -43,6 +43,14 @@ describe("validatePhone", () => {
     expect(validatePhone("+1234567890123456")).toMatchObject({ ok: false, error: expect.stringContaining("太長了") });
     expect(validatePhone("+0912345678")).toEqual({ ok: false, error: "國碼第一位不可為 0" });
   });
+
+  it("accepts 7 digits and reports the same minimum when shorter", () => {
+    expect(validatePhone("+2901234")).toEqual({ ok: true, e164: "+2901234" });
+    expect(validatePhone("+290123")).toEqual({
+      ok: false,
+      error: "太短了 — 國際格式至少 7 位數字（目前 6 位）",
+    });
+  });
 });
 
 describe("getPhoneLiveStatus", () => {
