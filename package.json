@@ -16,6 +16,7 @@
     "bridge": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local workers/telegram-bridge.ts",
     "audit": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local tools/devtools-audit.ts",
     "check": "tsc --noEmit && eslint \"src/**/*.{ts,tsx}\" \"workers/**/*.ts\" --quiet",
+    "test": "vitest run",
     "preflight": "node scripts/deploy/preflight-check.mjs",
     "verify": "node scripts/deploy/post-deploy-verify.mjs",
     "secrets": "node scripts/deploy/generate-secrets.mjs",
@@ -66,6 +67,7 @@
     "prisma": "^6.19.3",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.3"
   }
 }
