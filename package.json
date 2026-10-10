@@ -9,7 +9,7 @@
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"workers/**/*.ts\"",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:seed": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local prisma/seed.ts",
     "db:push": "prisma db push",
     "setup:search": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local tools/setup-search-indexes.ts",
     "setup:vector": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local tools/setup-pgvector.ts",
